@@ -11,9 +11,9 @@ import (
 )
 
 var addcheatCmd = &cobra.Command{
-	Use:   "addcheat",
+	Use:   "addcheat [additional instructions]",
 	Short: "Add the last command from history to a navi cheat sheet",
-	Long:  "Retrieves the last command from shell history and asks Claude Code to add it to an appropriate navi cheat sheet",
+	Long:  "Retrieves the last command from shell history and asks Claude Code to add it to an appropriate navi cheat sheet. You can provide additional instructions as arguments.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cheatDir, _ := cmd.Flags().GetString("cheat-directory")
 
@@ -35,7 +35,13 @@ var addcheatCmd = &cobra.Command{
 			return fmt.Errorf("no command found in history")
 		}
 
-		if err := sendToClaudeCode(lastCommand, absCheatDir); err != nil {
+		// Combine additional arguments as extra instructions
+		additionalInstructions := ""
+		if len(args) > 0 {
+			additionalInstructions = strings.Join(args, " ")
+		}
+
+		if err := sendToClaudeCode(lastCommand, absCheatDir, additionalInstructions); err != nil {
 			return fmt.Errorf("failed to send to Claude Code: %v", err)
 		}
 
@@ -67,7 +73,7 @@ func getLastCommand() (string, error) {
 	return result, nil
 }
 
-func sendToClaudeCode(command, cheatDir string) error {
+func sendToClaudeCode(command, cheatDir, additionalInstructions string) error {
 	prompt := fmt.Sprintf(`Add this command to the appropriate navi cheat sheet in the directory %s:
 
 Command: %s
@@ -327,7 +333,12 @@ Make the addition concise and useful for future reference.
 
 Do everything autonomously without asking for confirmation. Allow all file operations and tool usage.`, cheatDir, command)
 
-	claudeCmd := exec.Command("claude", "--allow-all", prompt, cheatDir)
+	// Add additional instructions if provided
+	if additionalInstructions != "" {
+		prompt += fmt.Sprintf("\n\nAdditional instructions from user: %s", additionalInstructions)
+	}
+
+	claudeCmd := exec.Command("claude", "--dangerously-skip-permissions", prompt, cheatDir)
 	claudeCmd.Stdout = os.Stdout
 	claudeCmd.Stderr = os.Stderr
 	claudeCmd.Stdin = os.Stdin
