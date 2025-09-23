@@ -8,7 +8,7 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "vibe",
+	Use:   "bruh",
 	Short: "Commands to help you vibe code harder",
 	Long:  "Commands to help you vibe code harder",
 }
@@ -22,4 +22,5 @@ func Execute() {
 
 func init() {
 	rootCmd.AddCommand(branchCmd)
+	rootCmd.AddCommand(addcheatCmd)
 }
