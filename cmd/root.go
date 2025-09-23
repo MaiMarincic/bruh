@@ -22,7 +22,4 @@ func Execute() {
 
 func init() {
 	rootCmd.AddCommand(branchCmd)
-	rootCmd.AddCommand(commitCmd)
-	rootCmd.AddCommand(scanCmd)
-	rootCmd.AddCommand(prCmd)
 }

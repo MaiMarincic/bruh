@@ -1,6 +1,6 @@
 package main
 
-import "github.com/dreamsofcode-io/vibe/cmd"
+import "github.com/MaiMarincic/bruh/cmd"
 
 func main() {
 	cmd.Execute()
