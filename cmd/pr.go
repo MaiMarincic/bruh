@@ -1,0 +1,195 @@
+package cmd
+
+import (
+	"fmt"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/MaiMarincic/bruh/config"
+	"github.com/briandowns/spinner"
+	"github.com/spf13/cobra"
+)
+
+var prCmd = &cobra.Command{
+	Use:   "pr",
+	Short: "Create a pull request with AI-generated summary and test criteria",
+	Long: `Create a pull request using GitHub CLI with Claude-generated summary and testing criteria.
+Claude will analyze the changes between the current branch and the base branch to create
+a comprehensive PR description.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateGitRepo(); err != nil {
+			return fmt.Errorf("not in a git repository")
+		}
+
+		currentBranch, err := getCurrentBranch()
+		if err != nil {
+			return fmt.Errorf("failed to get current branch: %v", err)
+		}
+
+		if currentBranch == "main" || currentBranch == "master" {
+			return fmt.Errorf("cannot create PR from %s branch", currentBranch)
+		}
+
+		if err := checkGHCLI(); err != nil {
+			return fmt.Errorf("GitHub CLI (gh) is not installed or not authenticated: %v", err)
+		}
+
+		s := spinner.New(spinner.CharSets[11], 100*time.Millisecond)
+		s.Suffix = " Analyzing changes and generating PR description with Claude..."
+		s.Start()
+
+		prDescription, err := generatePRDescription(currentBranch)
+		s.Stop()
+
+		if err != nil {
+			return fmt.Errorf("failed to generate PR description: %v", err)
+		}
+
+		fmt.Printf("Generated PR description:\n%s\n\n", prDescription)
+
+		s = spinner.New(spinner.CharSets[11], 100*time.Millisecond)
+		s.Suffix = " Creating pull request..."
+		s.Start()
+
+		prURL, err := createPR(prDescription)
+		s.Stop()
+
+		if err != nil {
+			return fmt.Errorf("failed to create PR: %v", err)
+		}
+
+		fmt.Printf("Successfully created pull request: %s\n", prURL)
+		return nil
+	},
+}
+
+func checkGHCLI() error {
+	cmd := exec.Command("gh", "--version")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("gh CLI not found")
+	}
+
+	cmd = exec.Command("gh", "auth", "status")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("gh CLI not authenticated")
+	}
+
+	return nil
+}
+
+func generatePRDescription(currentBranch string) (string, error) {
+	baseCmd := exec.Command("gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name")
+	baseOutput, err := baseCmd.Output()
+	var baseBranch string
+	if err != nil {
+		baseBranch = "main"
+	} else {
+		baseBranch = strings.TrimSpace(string(baseOutput))
+	}
+
+	diffCmd := exec.Command("git", "diff", fmt.Sprintf("%s...HEAD", baseBranch), "--name-status")
+	diffOutput, err := diffCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get diff: %v", err)
+	}
+
+	logCmd := exec.Command("git", "log", fmt.Sprintf("%s..HEAD", baseBranch), "--oneline")
+	logOutput, err := logCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get commit log: %v", err)
+	}
+
+	detailedDiffCmd := exec.Command("git", "diff", fmt.Sprintf("%s...HEAD", baseBranch), "--stat")
+	detailedDiffOutput, err := detailedDiffCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get detailed diff: %v", err)
+	}
+
+	cfg := config.Get()
+
+	projectName, err := getProjectName()
+	if err != nil {
+		projectName = "default"
+	}
+
+	selectedPrompt := cfg.PR.Prompts[projectName]
+	if selectedPrompt == "" {
+		selectedPrompt = cfg.PR.Prompts["default"]
+	}
+
+	prompt := fmt.Sprintf(`%s
+
+Changed Files:
+%s
+
+Commit History:
+%s
+
+Detailed Changes:
+%s`,
+		selectedPrompt,
+		string(diffOutput),
+		string(logOutput),
+		string(detailedDiffOutput))
+
+	claudeCmd := exec.Command("claude", "--print", "--allowedTools", "Bash(gh:*)", "--", prompt)
+	output, err := claudeCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to create PR with Claude: %v", err)
+	}
+
+	return strings.TrimSpace(string(output)), nil
+}
+
+func getProjectName() (string, error) {
+	cmd := exec.Command("git", "remote", "get-url", "origin")
+	output, err := cmd.Output()
+	if err != nil {
+		cmd = exec.Command("git", "rev-parse", "--show-toplevel")
+		output, err = cmd.Output()
+		if err != nil {
+			return "", err
+		}
+		repoPath := strings.TrimSpace(string(output))
+		return strings.ToLower(filepath.Base(repoPath)), nil
+	}
+
+	remoteURL := strings.TrimSpace(string(output))
+
+	if strings.Contains(remoteURL, "github.com") {
+		parts := strings.Split(remoteURL, "/")
+		if len(parts) >= 2 {
+			repoName := parts[len(parts)-1]
+			repoName = strings.TrimSuffix(repoName, ".git")
+			return strings.ToLower(repoName), nil
+		}
+	}
+
+	if strings.Contains(remoteURL, ":") {
+		parts := strings.Split(remoteURL, ":")
+		if len(parts) >= 2 {
+			pathPart := parts[len(parts)-1]
+			parts = strings.Split(pathPart, "/")
+			if len(parts) >= 1 {
+				repoName := parts[len(parts)-1]
+				repoName = strings.TrimSuffix(repoName, ".git")
+				return strings.ToLower(repoName), nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("could not extract project name from remote URL")
+}
+
+func createPR(description string) (string, error) {
+	lines := strings.Split(description, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "github.com") && strings.Contains(line, "/pull/") {
+			return strings.TrimSpace(line), nil
+		}
+	}
+
+	return description, nil
+}

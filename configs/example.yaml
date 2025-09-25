@@ -5,3 +5,10 @@
 branch:
   using_tmux: true                 # use tmux for editor session (true/false)
   editor: "nvim"                   # default editor to open (nvim, vim, code, etc.)
+
+# PR command specific settings
+pr:
+  prompts:
+    default: "Based on the following git changes, create a PR with a detailed summary and test plan. Use proper markdown formatting. Execute the gh pr create command directly."
+    my-project: "Create a comprehensive PR for my-project with focus on architecture changes. Include migration notes if database changes exist. Execute the gh pr create command directly."
+    frontend-app: "Generate a PR for frontend changes. Focus on UI/UX improvements, component changes, and accessibility. Include screenshots if applicable. Execute the gh pr create command directly."

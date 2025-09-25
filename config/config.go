@@ -2,6 +2,7 @@ package config
 
 type Config struct {
 	Branch BranchConfig `mapstructure:"branch"`
+	PR     PRConfig     `mapstructure:"pr"`
 }
 
 type BranchConfig struct {
@@ -9,11 +10,20 @@ type BranchConfig struct {
 	Editor      string `mapstructure:"editor"`
 }
 
+type PRConfig struct {
+	Prompts map[string]string `mapstructure:"prompts"`
+}
+
 func DefaultConfig() *Config {
 	return &Config{
 		Branch: BranchConfig{
 			UsingTmux: true,
 			Editor:    "nvim",
+		},
+		PR: PRConfig{
+			Prompts: map[string]string{
+				"default": "Based on the following git changes, create a PR. Execute the gh pr create command directly.",
+			},
 		},
 	}
 }
