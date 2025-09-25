@@ -7,49 +7,65 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/MaiMarincic/bruh/config"
 	"github.com/spf13/cobra"
 )
 
-type Config struct {
-	BranchName   string
-	TmuxMode     string
-	WorktreePath string
-	SessionName  string
+type BranchRuntime struct {
+	UsingTmux  bool
+	FromBranch string
+	BranchName string
+	Editor     string
 }
 
 var branchCmd = &cobra.Command{
-	Use:   "branch [branch-name]",
-	Short: "Create a git worktree for a branch and open it in tmux",
-	Args:  cobra.ExactArgs(1),
+	Use:   "branch",
+	Short: "Create a git worktree and open editor",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		config := Config{
-			BranchName: args[0],
+		cfg := config.Get()
+
+		usingTmux, _ := cmd.Flags().GetBool("using-tmux")
+		if !cmd.Flags().Changed("using-tmux") {
+			usingTmux = cfg.Branch.UsingTmux
 		}
 
-		tmuxMode, _ := cmd.Flags().GetString("tmux")
-		config.TmuxMode = tmuxMode
+		fromBranch, _ := cmd.Flags().GetString("from-branch")
+		if fromBranch == "" {
+			currentBranch, err := getCurrentBranch()
+			if err != nil {
+				return fmt.Errorf("failed to get current branch: %v", err)
+			}
+			fromBranch = currentBranch
+		}
 
-		worktreePath, _ := cmd.Flags().GetString("path")
-		config.WorktreePath = worktreePath
+		branchName, _ := cmd.Flags().GetString("branch-name")
+		if branchName == "" {
+			branchName = fromBranch + "-worktree"
+		}
 
-		sessionName, _ := cmd.Flags().GetString("session")
-		config.SessionName = sessionName
+		editor, _ := cmd.Flags().GetString("editor")
+		if editor == "" {
+			editor = cfg.Branch.Editor
+		}
 
-		if config.TmuxMode != "window" && config.TmuxMode != "session" {
-			return fmt.Errorf("tmux mode must be 'window' or 'session'")
+		runtime := BranchRuntime{
+			UsingTmux:  usingTmux,
+			FromBranch: fromBranch,
+			BranchName: branchName,
+			Editor:     editor,
 		}
 
 		if err := validateGitRepo(); err != nil {
 			return fmt.Errorf("not in a git repository")
 		}
 
-		worktreePath, err := createWorktree(config)
+		worktreePath, err := createWorktree(runtime)
 		if err != nil {
 			return fmt.Errorf("error creating worktree: %v", err)
 		}
 
-		if err := openInTmux(worktreePath, config); err != nil {
-			return fmt.Errorf("error opening tmux: %v", err)
+		if err := openEditor(worktreePath, runtime); err != nil {
+			return fmt.Errorf("error opening editor: %v", err)
 		}
 
 		return nil
@@ -57,9 +73,10 @@ var branchCmd = &cobra.Command{
 }
 
 func init() {
-	branchCmd.Flags().StringP("tmux", "t", "window", "Tmux mode: 'window' or 'session'")
-	branchCmd.Flags().StringP("path", "p", "", "Custom path for the worktree (optional)")
-	branchCmd.Flags().StringP("session", "s", "", "Tmux session name (only for session mode)")
+	branchCmd.Flags().Bool("using-tmux", false, "Use tmux for editor session (default from config)")
+	branchCmd.Flags().String("from-branch", "", "Branch from which to create worktree (default: current branch)")
+	branchCmd.Flags().String("branch-name", "", "Name of worktree branch (default: <from-branch>-worktree)")
+	branchCmd.Flags().String("editor", "", "Editor to open (default from config)")
 }
 
 func validateGitRepo() error {
@@ -70,34 +87,26 @@ func validateGitRepo() error {
 	return nil
 }
 
-func createWorktree(config Config) (string, error) {
-	worktreePath := config.WorktreePath
-	if worktreePath == "" {
-		repoRoot, err := getRepoRoot()
-		if err != nil {
-			return "", err
-		}
-		parentDir := filepath.Dir(repoRoot)
-		repoName := filepath.Base(repoRoot)
-		worktreePath = filepath.Join(parentDir, fmt.Sprintf("%s-%s", repoName, config.BranchName))
+func getCurrentBranch() (string, error) {
+	cmd := exec.Command("git", "branch", "--show-current")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get current branch: %v", err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func createWorktree(runtime BranchRuntime) (string, error) {
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return "", err
 	}
 
-	// Check if branch exists locally or on remote
-	localExists := branchExistsLocally(config.BranchName)
-	remoteRef := findRemoteBranch(config.BranchName)
+	parentDir := filepath.Dir(repoRoot)
+	repoName := filepath.Base(repoRoot)
+	worktreePath := filepath.Join(parentDir, fmt.Sprintf("%s-%s", repoName, runtime.BranchName))
 
-	var cmd *exec.Cmd
-	if localExists {
-		// Use existing local branch
-		cmd = exec.Command("git", "worktree", "add", worktreePath, config.BranchName)
-	} else if remoteRef != "" {
-		// Create worktree from remote branch
-		cmd = exec.Command("git", "worktree", "add", worktreePath, remoteRef)
-	} else {
-		// Create new local branch
-		cmd = exec.Command("git", "worktree", "add", worktreePath, "-b", config.BranchName)
-	}
-
+	cmd := exec.Command("git", "worktree", "add", worktreePath, "-b", runtime.BranchName, runtime.FromBranch)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to create worktree: %s", output)
@@ -116,85 +125,43 @@ func getRepoRoot() (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-func branchExistsLocally(branchName string) bool {
-	cmd := exec.Command("git", "rev-parse", "--verify", branchName)
-	err := cmd.Run()
-	return err == nil
+func openEditor(worktreePath string, runtime BranchRuntime) error {
+	if runtime.UsingTmux && isTmuxRunning() {
+		return openEditorInTmux(worktreePath, runtime)
+	}
+	return openEditorDirect(worktreePath, runtime)
 }
 
-func findRemoteBranch(branchName string) string {
-	// First try to find exact match on any remote
-	cmd := exec.Command("git", "branch", "-r", "--list", fmt.Sprintf("*/%s", branchName))
-	output, err := cmd.Output()
-	if err != nil {
-		return ""
+func openEditorInTmux(worktreePath string, runtime BranchRuntime) error {
+	cmd := exec.Command("tmux", "new-window", "-c", worktreePath, "-n", filepath.Base(worktreePath))
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to create tmux window: %v", err)
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" && !strings.Contains(line, "->") {
-			return line
-		}
+	cmd = exec.Command("tmux", "send-keys", "-t", fmt.Sprintf(":%s", filepath.Base(worktreePath)), runtime.Editor, "Enter")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to open editor in tmux: %v", err)
 	}
 
-	return ""
+	fmt.Printf("Opened %s in tmux window at: %s\n", runtime.Editor, worktreePath)
+	return nil
 }
 
-func openInTmux(worktreePath string, config Config) error {
-	if !isTmuxRunning() {
-		return fmt.Errorf("tmux is not running")
+func openEditorDirect(worktreePath string, runtime BranchRuntime) error {
+	cmd := exec.Command(runtime.Editor, worktreePath)
+	cmd.Dir = worktreePath
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to open editor: %v", err)
 	}
 
-	var target string
-	if config.TmuxMode == "session" {
-		sessionName := config.SessionName
-		if sessionName == "" {
-			sessionName = filepath.Base(worktreePath)
-		}
-		cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "-c", worktreePath)
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to create tmux session: %v", err)
-		}
-		target = sessionName
-
-		cmd = exec.Command("tmux", "switch-client", "-t", sessionName)
-		if err := cmd.Run(); err != nil {
-			cmd = exec.Command("tmux", "attach-session", "-t", sessionName)
-			if err := cmd.Run(); err != nil {
-				return fmt.Errorf("failed to switch to tmux session: %v", err)
-			}
-		}
-	} else {
-		cmd := exec.Command("tmux", "new-window", "-c", worktreePath, "-n", filepath.Base(worktreePath))
-		output, err := cmd.Output()
-		if err != nil {
-			return fmt.Errorf("failed to create tmux window: %v", err)
-		}
-		target = strings.TrimSpace(string(output))
-		if target == "" {
-			target = fmt.Sprintf(":%s", filepath.Base(worktreePath))
-		}
-	}
-
-	if err := openClaudeCodeInTmux(worktreePath, target); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to open Claude Code: %v\n", err)
-	}
-
-	fmt.Printf("Opened tmux %s at: %s\n", config.TmuxMode, worktreePath)
+	fmt.Printf("Opened %s at: %s\n", runtime.Editor, worktreePath)
 	return nil
 }
 
 func isTmuxRunning() bool {
 	return os.Getenv("TMUX") != ""
-}
-
-func openClaudeCodeInTmux(worktreePath, target string) error {
-	cmd := exec.Command("tmux", "send-keys", "-t", target, fmt.Sprintf("claude %s", worktreePath), "Enter")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to send Claude command to tmux: %v", err)
-	}
-
-	fmt.Printf("Opened Claude at: %s\n", worktreePath)
-	return nil
 }

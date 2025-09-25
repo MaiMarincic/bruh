@@ -1,0 +1,7 @@
+# Example configuration for bruh CLI
+# Copy this file to ~/.config/bruh/config.yaml to customize defaults
+
+# Branch command specific settings
+branch:
+  using_tmux: true                 # use tmux for editor session (true/false)
+  editor: "nvim"                   # default editor to open (nvim, vim, code, etc.)

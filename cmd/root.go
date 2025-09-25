@@ -4,13 +4,18 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/MaiMarincic/bruh/config"
 	"github.com/spf13/cobra"
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "bruh",
-	Short: "Commands to help you vibe code harder",
-	Long:  "Commands to help you vibe code harder",
+	Short: "Just usefull commands",
+	Long:  "Just usefull commands",
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		_, err := config.Load()
+		return err
+	},
 }
 
 func Execute() {
@@ -22,5 +27,4 @@ func Execute() {
 
 func init() {
 	rootCmd.AddCommand(branchCmd)
-	rootCmd.AddCommand(addcheatCmd)
 }
