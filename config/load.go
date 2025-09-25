@@ -32,6 +32,7 @@ func Load() (*Config, error) {
 	v.SetDefault("branch.using_tmux", defaults.Branch.UsingTmux)
 	v.SetDefault("branch.editor", defaults.Branch.Editor)
 	v.SetDefault("pr.prompts", defaults.PR.Prompts)
+	v.SetDefault("cleanup-pre-commit", defaults.CleanupPreCommit)
 
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {

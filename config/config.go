@@ -1,8 +1,9 @@
 package config
 
 type Config struct {
-	Branch BranchConfig `mapstructure:"branch"`
-	PR     PRConfig     `mapstructure:"pr"`
+	Branch           BranchConfig `mapstructure:"branch"`
+	PR               PRConfig     `mapstructure:"pr"`
+	CleanupPreCommit []string     `mapstructure:"cleanup-pre-commit"`
 }
 
 type BranchConfig struct {
@@ -25,5 +26,6 @@ func DefaultConfig() *Config {
 				"default": "Based on the following git changes, create a PR. Execute the gh pr create command directly.",
 			},
 		},
+		CleanupPreCommit: []string{},
 	}
 }
