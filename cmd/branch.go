@@ -104,7 +104,8 @@ func createWorktree(runtime BranchRuntime) (string, error) {
 
 	parentDir := filepath.Dir(repoRoot)
 	repoName := filepath.Base(repoRoot)
-	worktreePath := filepath.Join(parentDir, fmt.Sprintf("%s-%s", repoName, runtime.BranchName))
+	safeBranchName := strings.ReplaceAll(runtime.BranchName, "/", "-")
+	worktreePath := filepath.Join(parentDir, fmt.Sprintf("%s-%s", repoName, safeBranchName))
 
 	cmd := exec.Command("git", "worktree", "add", worktreePath, "-b", runtime.BranchName, runtime.FromBranch)
 	output, err := cmd.CombinedOutput()
@@ -138,7 +139,7 @@ func openEditorInTmux(worktreePath string, runtime BranchRuntime) error {
 		return fmt.Errorf("failed to create tmux window: %v", err)
 	}
 
-	cmd = exec.Command("tmux", "send-keys", "-t", fmt.Sprintf(":%s", filepath.Base(worktreePath)), runtime.Editor, "Enter")
+	cmd = exec.Command("tmux", "send-keys", "-t", fmt.Sprintf(":%s", filepath.Base(worktreePath)), runtime.Editor+" .", "Enter")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to open editor in tmux: %v", err)
 	}
@@ -148,7 +149,7 @@ func openEditorInTmux(worktreePath string, runtime BranchRuntime) error {
 }
 
 func openEditorDirect(worktreePath string, runtime BranchRuntime) error {
-	cmd := exec.Command(runtime.Editor, worktreePath)
+	cmd := exec.Command(runtime.Editor, ".")
 	cmd.Dir = worktreePath
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
